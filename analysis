@@ -1,0 +1,83 @@
+## Rents/OER Arima
+
+#%%
+# =============================================================================
+# 1 - Import modules
+# =============================================================================
+
+from matplotlib import pyplot as plt
+import pandas as pd
+import numpy as np
+from scipy import stats
+from statsmodels.tsa.api import VAR
+import statsmodels.api as sm
+from datetime import datetime, timedelta, date
+from collections import OrderedDict
+from PIL import Image
+import matplotlib
+from scipy.optimize import differential_evolution, LinearConstraint, minimize_scalar
+import seaborn as sns
+from dateutil.relativedelta import relativedelta
+from statsmodels.tsa.arima.model import ARIMA
+from statsmodels.tsa.seasonal import seasonal_decompose
+import win32com.client
+from sklearn.linear_model import Lasso
+
+# Configure matplotlib and seaborn
+matplotlib.use('agg')
+plt.style.use("seaborn-darkgrid")
+sns.set_palette("tab10")
+
+# Suppress pandas warnings
+pd.options.mode.chained_assignment = None
+
+# Define utility functions
+def getDataframe(db, unifiedSeriesRequest):
+    series = db.FetchSeries(unifiedSeriesRequest)
+    return pd.DataFrame({s.Name: toPandasSeries(s) for s in series})
+
+def toPandasSeries(series):
+    pdates = pd.to_datetime([d.strftime('%Y-%m-%d') for d in series.DatesAtStartOfPeriod])
+    return pd.Series(series.values, index=pdates)
+
+#%%
+# =============================================================================
+# 2 - Loading and processing data
+# =============================================================================
+
+forecast_month = '2024-06-01'
+MB_start_month = '1990-01-01'
+
+print('Fetching Macrobond Data...')
+
+c = win32com.client.Dispatch("Macrobond.Connection")
+d = c.Database
+r = d.CreateUnifiedSeriesRequest()
+
+rents = pd.DataFrame(index=pd.date_range(MB_start_month, date.today().strftime("%Y-%m-%d"), freq="MS"))
+
+r = d.CreateUnifiedSeriesRequest()
+r.AddSeries("uspric1138")
+r.AddSeries("uspric1134")
+df_temp = getDataframe(d, r)
+df_temp = df_temp.pct_change() * 100
+df_temp = df_temp.dropna()
+rents = rents.join(df_temp, how='left')
+rents = rents.dropna()
+
+rents.columns = ['OER', 'Rents']
+
+# Define ARIMA order
+p, d, q = 6, 0, 1
+
+# Fit and forecast OER
+model_OER = ARIMA(rents['OER'], order=(p, d, q))
+fit_model_OER = model_OER.fit()
+forecast_OER = fit_model_OER.forecast(steps=1)
+print("Forecasted Value OER:", round(forecast_OER[0], 3))
+
+# Fit and forecast Rents
+model_Rents = ARIMA(rents['Rents'], order=(p, d, q))
+fit_model_Rents = model_Rents.fit()
+forecast_Rents = fit_model_Rents.forecast(steps=1)
+print("Forecasted Value Rents:", round(forecast_Rents[0], 3))
